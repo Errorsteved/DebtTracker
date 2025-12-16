@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
+import Database from 'better-sqlite3';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let db;
@@ -9,7 +9,7 @@ let db;
 const getDatabase = () => {
   if (db) return db;
   const dbPath = path.join(app.getPath('userData'), 'debt-tracker.db');
-  db = new DatabaseSync(dbPath);
+  db = new Database(dbPath);
   initializeDatabase(db);
   seedDefaults(db);
   return db;
