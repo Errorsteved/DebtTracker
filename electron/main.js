@@ -60,7 +60,13 @@ const getDatabase = () => {
   dbPath = path.join(userData, 'debt-tracker.db');
 
   dbPromise = (async () => {
-    logDebug('Opening SQLite connection', { appName: app.getName(), userData, dbPath });
+    logDebug('Opening SQLite connection', {
+      appName: app.getName(),
+      userData,
+      dbPath,
+      processType: process.type,
+      dbExists: fs.existsSync(dbPath),
+    });
     const database = await openDatabase(dbPath);
     await run(database, 'PRAGMA journal_mode=WAL;');
     await initializeDatabase(database);
@@ -201,6 +207,11 @@ const applyChanges = async state => {
 };
 
 const registerIpcHandlers = () => {
+  ipcMain.handle('db:log', async (_event, message, meta = {}) => {
+    logDebug(message, { source: 'renderer', ...meta });
+    return true;
+  });
+
   ipcMain.handle('db:getStatus', async () => {
     const database = await getDatabase();
     const userData = ensureUserDataDir();

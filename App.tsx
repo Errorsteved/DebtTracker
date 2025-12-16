@@ -229,6 +229,7 @@ const App: React.FC = () => {
       try {
         const status = await getDatabaseStatus();
         console.info('[DB] SQLite status', status);
+        await window.dbApi?.log?.('Renderer received SQLite status', status);
       } catch (error) {
         console.warn('[DB] Unable to read SQLite status', error);
       }
@@ -269,6 +270,10 @@ const App: React.FC = () => {
         latestStateRef.current = normalizedState;
         hasHydrated.current = true;
         setHydrated(true);
+        await window.dbApi?.log?.('Renderer hydrated from SQLite', {
+          accounts: normalizedState.accounts.length,
+          transactions: normalizedState.transactions.length,
+        });
       } catch (error) {
         console.error('[DB] Failed to hydrate app state', error);
         const fallback = buildDefaultState();
@@ -283,6 +288,7 @@ const App: React.FC = () => {
         latestStateRef.current = fallback;
         hasHydrated.current = true;
         setHydrated(true);
+        await window.dbApi?.log?.('Renderer using fallback state after hydration failure');
       }
     };
 

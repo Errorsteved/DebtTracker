@@ -14,6 +14,7 @@ type DatabaseApi = {
     settings: AppSettings;
   }) => Promise<boolean>;
   getStatus: () => Promise<{ userData: string; dbPath: string; dbExists: boolean; dbSize: number; counts: Record<string, number> }>;
+  log?: (message: string, meta?: Record<string, unknown>) => Promise<boolean>;
 };
 
 declare global {
@@ -76,6 +77,11 @@ export const buildDefaultState = (): AppState => {
 
 export const loadAppState = async (): Promise<AppState> => {
   try {
+    try {
+      await getDbApi().log?.('Renderer requesting DB load');
+    } catch (err) {
+      console.warn('Renderer could not log to main process', err);
+    }
     const state = await getDbApi().load();
 
     const normalized: AppState = {
@@ -102,12 +108,21 @@ export const loadAppState = async (): Promise<AppState> => {
   } catch (error) {
     console.error('Failed to load app state from SQLite, falling back to defaults', error);
     const defaults = buildDefaultState();
-    await getDbApi().flush(defaults);
+    try {
+      await getDbApi().flush(defaults);
+      await getDbApi().log?.('Renderer wrote fallback defaults after load failure');
+    } catch (err) {
+      console.error('Failed to flush defaults to SQLite', err);
+    }
     return defaults;
   }
 };
 
 export const persistAppState = async (state: AppState) => {
+  await getDbApi().log?.('Renderer flushing state to SQLite', {
+    accounts: state.accounts.length,
+    transactions: state.transactions.length,
+  });
   await getDbApi().flush(state);
 };
 
