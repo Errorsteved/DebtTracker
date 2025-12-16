@@ -1,0 +1,5 @@
+{
+  "name": "DebtTracker Pro",
+  "description": "An iPad-style debt and repayment tracking application featuring data visualization, transaction management, and a clean, responsive UI.",
+  "requestFramePermissions": []
+}
