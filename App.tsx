@@ -160,13 +160,8 @@ type ViewState = 'DASHBOARD' | 'BORROWERS' | 'TRANSACTIONS' | 'REPORTS' | 'SETTI
 
 const App: React.FC = () => {
   // Accounts State - Initialize synchronously
-  const [accounts, setAccounts] = useState<Account[]>(() => getAccounts());
-  const [currentAccountId, setCurrentAccountIdState] = useState<string>(() => {
-      const stored = getCurrentAccountId();
-      const initialAccounts = getAccounts();
-      // Ensure stored ID exists in initial accounts
-      return initialAccounts.find(a => a.id === stored) ? stored : initialAccounts[0].id;
-  });
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [currentAccountId, setCurrentAccountIdState] = useState<string>('');
 
   // Data State
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
@@ -203,31 +198,38 @@ const App: React.FC = () => {
 
   // Load initial data
   useEffect(() => {
-    // Accounts and CurrentAccountId are loaded in useState initializer to prevent undefined on first render
+    const loadData = async () => {
+      const loadedAccounts = await getAccounts();
+      setAccounts(loadedAccounts);
 
-    // 3. Load All Transactions
-    let data = getStoredTransactions();
-    
-    // FIX: Self-healing to ensure all transactions have IDs (legacy data support)
-    // This prevents export issues where IDs might be undefined for secondary accounts
-    let dataModified = false;
-    data = data.map(t => {
-        if (!t.id) {
-            dataModified = true;
-            return { ...t, id: generateId() };
-        }
-        return t;
-    });
-    
-    if (dataModified) {
-        saveTransactions(data);
-    }
+      const stored = await getCurrentAccountId();
+      const resolvedCurrentId = loadedAccounts.find(a => a.id === stored)?.id || loadedAccounts[0]?.id || '';
+      setCurrentAccountIdState(resolvedCurrentId);
 
-    setAllTransactions(data);
+      let data = await getStoredTransactions();
 
-    // 4. Load Settings
-    const storedSettings = getStoredSettings();
-    setSettings(s => ({ ...s, ...storedSettings }));
+      // FIX: Self-healing to ensure all transactions have IDs (legacy data support)
+      // This prevents export issues where IDs might be undefined for secondary accounts
+      let dataModified = false;
+      data = data.map(t => {
+          if (!t.id) {
+              dataModified = true;
+              return { ...t, id: generateId() };
+          }
+          return t;
+      });
+
+      if (dataModified) {
+          await saveTransactions(data);
+      }
+
+      setAllTransactions(data);
+
+      const storedSettings = await getStoredSettings();
+      setSettings(s => ({ ...s, ...storedSettings }));
+    };
+
+    loadData();
   }, []);
 
   // Derived State: Active Transactions for Current Account
@@ -244,12 +246,12 @@ const App: React.FC = () => {
 
   const handleSwitchAccount = (id: string) => {
       setCurrentAccountIdState(id);
-      setCurrentAccountId(id);
+      void setCurrentAccountId(id);
       // Optional: Reset view to dashboard on switch?
       setCurrentView('DASHBOARD');
   };
 
-  const handleCreateAccount = (name: string, color: string) => {
+  const handleCreateAccount = async (name: string, color: string) => {
       const newAccount: Account = {
           id: generateId(),
           name,
@@ -257,14 +259,14 @@ const App: React.FC = () => {
       };
       const updatedAccounts = [...accounts, newAccount];
       setAccounts(updatedAccounts);
-      saveAccounts(updatedAccounts);
+      await saveAccounts(updatedAccounts);
       handleSwitchAccount(newAccount.id);
   };
 
-  const handleUpdateAccount = (updatedAccount: Account) => {
+  const handleUpdateAccount = async (updatedAccount: Account) => {
       const updatedAccounts = accounts.map(a => a.id === updatedAccount.id ? updatedAccount : a);
       setAccounts(updatedAccounts);
-      saveAccounts(updatedAccounts);
+      await saveAccounts(updatedAccounts);
   };
 
   const requestDeleteAccount = (accountId: string) => {
@@ -273,7 +275,7 @@ const App: React.FC = () => {
           alert("Cannot delete the only account.");
           return;
       }
-      
+
       const validationPhrase = settings.language === 'en' ? 'delete account' : '删除账本';
       setDeleteModalState({
           isOpen: true,
@@ -285,9 +287,9 @@ const App: React.FC = () => {
 
   // --- Data Handlers ---
 
-  const handleUpdateSettings = (newSettings: AppSettings) => {
+  const handleUpdateSettings = async (newSettings: AppSettings) => {
       setSettings(newSettings);
-      saveSettings(newSettings);
+      await saveSettings(newSettings);
   };
 
   // Translation Helper
@@ -360,7 +362,7 @@ const App: React.FC = () => {
     }).slice(0, 10);
   }, [transactions, dashboardFilter, dashboardDateFilter]);
 
-  const handleSaveTransaction = (data: any) => {
+  const handleSaveTransaction = async (data: any) => {
     let updatedAllTransactions;
 
     // Check if it's an edit (ID exists)
@@ -383,11 +385,11 @@ const App: React.FC = () => {
     }
 
     setAllTransactions(updatedAllTransactions);
-    saveTransactions(updatedAllTransactions);
+    await saveTransactions(updatedAllTransactions);
     setPrefillData(undefined); // Reset prefill
   };
 
-  const handleImportTransactions = (importData: {transactions: Transaction[], accounts?: Account[]}) => {
+  const handleImportTransactions = async (importData: {transactions: Transaction[], accounts?: Account[]}) => {
       // 1. Handle New Accounts
       let updatedAccounts = [...accounts];
       if (importData.accounts) {
@@ -398,7 +400,7 @@ const App: React.FC = () => {
               }
           });
           setAccounts(updatedAccounts);
-          saveAccounts(updatedAccounts);
+          await saveAccounts(updatedAccounts);
       }
 
       // 2. Handle Transactions
@@ -420,7 +422,7 @@ const App: React.FC = () => {
 
       const mergedTransactions = Array.from(currentMap.values());
       setAllTransactions(mergedTransactions);
-      saveTransactions(mergedTransactions);
+      await saveTransactions(mergedTransactions);
   };
 
   const handleEditTransaction = (tx: Transaction) => {
@@ -451,19 +453,19 @@ const App: React.FC = () => {
       });
   };
 
-  const performDelete = () => {
+  const performDelete = async () => {
       const { type, targetId, targetName } = deleteModalState;
       let updated: Transaction[] = [];
 
       if (type === 'TRANSACTION' && targetId) {
           updated = allTransactions.filter(t => t.id !== targetId);
           setAllTransactions(updated);
-          saveTransactions(updated);
+          await saveTransactions(updated);
       } else if (type === 'BORROWER' && targetName) {
           // Only delete borrower for CURRENT account
           updated = allTransactions.filter(t => !(t.borrower === targetName && t.accountId === currentAccountId));
           setAllTransactions(updated);
-          saveTransactions(updated);
+          await saveTransactions(updated);
       } else if (type === 'CATEGORY' && targetName) {
           // Delete category logic
           const newCategories = settings.categories.filter(c => c !== targetName);
@@ -473,24 +475,24 @@ const App: React.FC = () => {
           // Clear only CURRENT account data
           updated = allTransactions.filter(t => t.accountId !== currentAccountId);
           setAllTransactions(updated);
-          saveTransactions(updated);
+          await saveTransactions(updated);
       } else if (type === 'ACCOUNT' && targetId) {
           // Delete Account Logic
           const updatedAccounts = accounts.filter(a => a.id !== targetId);
           setAccounts(updatedAccounts);
-          saveAccounts(updatedAccounts);
+          await saveAccounts(updatedAccounts);
 
           // Delete associated transactions from ALL transactions
           updated = allTransactions.filter(t => t.accountId !== targetId);
           setAllTransactions(updated);
-          saveTransactions(updated);
+          await saveTransactions(updated);
 
           // If we deleted the current account, switch to the first available one
           if (currentAccountId === targetId) {
               handleSwitchAccount(updatedAccounts[0].id);
           }
-      } 
-      
+      }
+
       setDeleteModalState({ isOpen: false, type: 'TRANSACTION' });
   };
 
@@ -506,7 +508,7 @@ const App: React.FC = () => {
 
       if (modified) {
           setAllTransactions(updated);
-          saveTransactions(updated);
+          void saveTransactions(updated);
       }
 
       return modified ? updated : allTransactions;

@@ -13,6 +13,7 @@
     "electron:build:win": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
+    "sqlite3": "^5.1.7",
     "recharts": "^3.6.0",
     "react-dom": "^19.2.3",
     "lucide-react": "^0.561.0",
@@ -40,6 +41,9 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": [
+      "node_modules/sqlite3/**/*"
+    ],
     "win": {
       "target": "portable"
     }
