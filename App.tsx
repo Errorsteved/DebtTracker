@@ -213,39 +213,47 @@ const App: React.FC = () => {
         console.warn('[DB] Unable to read SQLite status', error);
       }
 
-      const state = await loadAppState();
+      try {
+        const state = await loadAppState();
 
-      // Self-heal legacy records missing IDs
-      let transactions = state.transactions;
-      let modified = false;
-      transactions = transactions.map(t => {
-        if (!t.id) {
-          modified = true;
-          return { ...t, id: generateId() };
+        // Self-heal legacy records missing IDs
+        let transactions = state.transactions;
+        let modified = false;
+        transactions = transactions.map(t => {
+          if (!t.id) {
+            modified = true;
+            return { ...t, id: generateId() };
+          }
+          return t;
+        });
+
+        const normalizedState = {
+          accounts: state.accounts,
+          currentAccountId: state.currentAccountId,
+          transactions,
+          settings: state.settings,
+        };
+
+        if (modified) {
+          await persistAppState(normalizedState);
         }
-        return t;
-      });
 
-      const normalizedState = {
-        accounts: state.accounts,
-        currentAccountId: state.currentAccountId,
-        transactions,
-        settings: state.settings,
-      };
+        setAccounts(normalizedState.accounts);
+        setCurrentAccountIdState(normalizedState.currentAccountId);
+        setAllTransactions(normalizedState.transactions);
+        setSettings(normalizedState.settings);
 
-      if (modified) {
-        await persistAppState(normalizedState);
+        const serialized = JSON.stringify(normalizedState);
+        lastPersistedRef.current = serialized;
+        isDirtyRef.current = false;
+        latestStateRef.current = normalizedState;
+        hasHydrated.current = true;
+        setHydrated(true);
+      } catch (error) {
+        console.error('[DB] Failed to hydrate app state', error);
+        hasHydrated.current = true;
+        setHydrated(true);
       }
-
-      setAccounts(normalizedState.accounts);
-      setCurrentAccountIdState(normalizedState.currentAccountId);
-      setAllTransactions(normalizedState.transactions);
-      setSettings(normalizedState.settings);
-
-      lastPersistedRef.current = JSON.stringify(normalizedState);
-      latestStateRef.current = normalizedState;
-      hasHydrated.current = true;
-      setHydrated(true);
     };
 
     loadData();
@@ -292,7 +300,8 @@ const App: React.FC = () => {
 
   // Automatic persistence every 5 seconds, only when dirty
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !hasHydrated.current) return;
+
     const interval = setInterval(() => {
       void flushState();
     }, 5000);
