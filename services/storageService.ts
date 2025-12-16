@@ -9,6 +9,16 @@ const CURRENT_ACCOUNT_KEY = 'debt_tracker_current_account_id';
 const DEFAULT_CATEGORIES = ['Personal', 'Business', 'Rent', 'Dining', 'Groceries', 'Travel', 'Utilities', 'Emergency'];
 const AVATAR_COLORS = ['bg-blue-500', 'bg-red-500', 'bg-green-500', 'bg-yellow-500', 'bg-purple-500', 'bg-pink-500', 'bg-indigo-500', 'bg-gray-800'];
 
+// --- ID Generator ---
+export const generateId = (): string => {
+  // Prefer crypto.randomUUID for better uniqueness
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+};
+
 // --- Account Management ---
 
 export const getAccounts = (): Account[] => {
@@ -50,17 +60,27 @@ export const getStoredTransactions = (): Transaction[] => {
   if (stored) {
     let transactions: Transaction[] = JSON.parse(stored);
     
-    // MIGRATION: If transactions don't have accountId, assign them to default account
+    // MIGRATION: Ensure accountId and ID exist
     const accounts = getAccounts();
     const defaultAccountId = accounts[0].id;
     let needsSave = false;
 
     transactions = transactions.map(t => {
-      if (!t.accountId) {
-        needsSave = true;
-        return { ...t, accountId: defaultAccountId };
+      let modified = false;
+      const newT = { ...t };
+      
+      if (!newT.accountId) {
+        newT.accountId = defaultAccountId;
+        modified = true;
       }
-      return t;
+      
+      if (!newT.id) {
+          newT.id = generateId();
+          modified = true;
+      }
+
+      if (modified) needsSave = true;
+      return newT;
     });
 
     if (needsSave) {
@@ -123,7 +143,7 @@ const generateMockData = (): Transaction[] => {
     if (Math.random() > 0.5) randomTags.push(tagsList[Math.floor(Math.random() * tagsList.length)]);
 
     data.push({
-      id: Math.random().toString(36).substr(2, 9),
+      id: generateId(),
       accountId: mainAccountId,
       borrower: borrowers[Math.floor(Math.random() * borrowers.length)],
       amount: amount,

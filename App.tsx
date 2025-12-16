@@ -34,7 +34,8 @@ import {
   getAccounts,
   saveAccounts,
   getCurrentAccountId,
-  setCurrentAccountId
+  setCurrentAccountId,
+  generateId
 } from './services/storageService';
 import { Transaction, TransactionType, AppSettings, Language, Account } from './types';
 import { translate } from './utils/i18n';
@@ -205,7 +206,23 @@ const App: React.FC = () => {
     // Accounts and CurrentAccountId are loaded in useState initializer to prevent undefined on first render
 
     // 3. Load All Transactions
-    const data = getStoredTransactions();
+    let data = getStoredTransactions();
+    
+    // FIX: Self-healing to ensure all transactions have IDs (legacy data support)
+    // This prevents export issues where IDs might be undefined for secondary accounts
+    let dataModified = false;
+    data = data.map(t => {
+        if (!t.id) {
+            dataModified = true;
+            return { ...t, id: generateId() };
+        }
+        return t;
+    });
+    
+    if (dataModified) {
+        saveTransactions(data);
+    }
+
     setAllTransactions(data);
 
     // 4. Load Settings
@@ -234,7 +251,7 @@ const App: React.FC = () => {
 
   const handleCreateAccount = (name: string, color: string) => {
       const newAccount: Account = {
-          id: Math.random().toString(36).substr(2, 9),
+          id: generateId(),
           name,
           avatarColor: color
       };
@@ -356,7 +373,7 @@ const App: React.FC = () => {
     } else {
         // Create new: Add with current account ID
         const newTx: Transaction = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: generateId(),
             accountId: currentAccountId,
             ...data
         };
@@ -391,7 +408,12 @@ const App: React.FC = () => {
               ...tx, 
               accountId: tx.accountId || currentAccountId 
           };
-          currentMap.set(tx.id, finalTx);
+          
+          if (!finalTx.id) {
+              finalTx.id = generateId();
+          }
+
+          currentMap.set(finalTx.id, finalTx);
       });
 
       const mergedTransactions = Array.from(currentMap.values());
@@ -477,25 +499,27 @@ const App: React.FC = () => {
           const isZh = settings.language === 'zh';
           const usedSheetNames = new Set<string>();
 
+          // Headers Keys - Defined once
+          const kDate = isZh ? '日期' : 'Date';
+          const kBorrower = isZh ? '对象' : 'Borrower';
+          const kCategory = isZh ? '分类' : 'Category';
+          const kTags = isZh ? '标签' : 'Tags';
+          const kStatus = isZh ? '状态' : 'Status';
+          const kAmount = isZh ? '金额' : 'Amount';
+          const kNote = isZh ? '备注' : 'Note';
+          const kDueDate = isZh ? '到期日' : 'DueDate';
+
+          const headers = ['ID', kDate, kBorrower, kCategory, kTags, kStatus, kAmount, kNote, kDueDate];
+
           accounts.forEach(account => {
               const accountTxs = allTransactions.filter(t => t.accountId === account.id);
-              if (accountTxs.length === 0) return; // Skip empty accounts? Optional. Let's keep empty accounts for completeness if needed, but user usually wants data. Let's export even empty to show account exists.
-
-              // Define localized headers keys
-              const kDate = isZh ? '日期' : 'Date';
-              const kBorrower = isZh ? '对象' : 'Borrower';
-              const kCategory = isZh ? '分类' : 'Category';
-              const kTags = isZh ? '标签' : 'Tags';
-              const kStatus = isZh ? '状态' : 'Status';
-              const kAmount = isZh ? '金额' : 'Amount';
-              const kNote = isZh ? '备注' : 'Note';
-              const kDueDate = isZh ? '到期日' : 'DueDate';
+              if (accountTxs.length === 0) return; // Optional: can export empty sheet if preferred
 
               const rows = accountTxs.map(t => {
                   const row: any = {};
                   
-                  // ID Column (Hidden or First) - Crucial for import deduplication
-                  row['ID'] = t.id || '';
+                  // ID Column (Guaranteed by useEffect self-healing)
+                  row['ID'] = t.id;
 
                   row[kDate] = t.date.split('T')[0];
                   row[kBorrower] = t.borrower;
@@ -510,14 +534,12 @@ const App: React.FC = () => {
                   }
                   
                   row[kAmount] = t.amount;
-                  row[kNote] = t.note;
+                  row[kNote] = t.note || '';
                   row[kDueDate] = t.dueDate ? t.dueDate.split('T')[0] : '';
                   
                   return row;
               });
               
-              // Explicitly define header order so ID is always first column and exists
-              const headers = ['ID', kDate, kBorrower, kCategory, kTags, kStatus, kAmount, kNote, kDueDate];
               const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
               
               // Ensure unique sheet name
@@ -537,12 +559,11 @@ const App: React.FC = () => {
           XLSX.writeFile(wb, "debt_tracker_backup.xlsx");
 
       } else {
-          // CSV Export Logic (Legacy)
-          // Map accountId to Account Name for readability
+          // CSV Export Logic (Legacy - Single Sheet All Data)
           const accountMap = new Map(accounts.map(a => [a.id, a.name]));
 
           const headers = ["ID", "Account", "Date", "Type", "Borrower", "Amount", "Category", "Note", "DueDate", "Tags"];
-          // Use allTransactions to ensure export covers everything
+          
           const rows = allTransactions.map(t => [
               t.id, 
               `"${accountMap.get(t.accountId) || 'Unknown'}"`,
@@ -551,11 +572,11 @@ const App: React.FC = () => {
               `"${t.borrower}"`, 
               t.amount, 
               t.category, 
-              `"${t.note}"`,
+              `"${t.note || ''}"`,
               t.dueDate || "",
               `"${t.tags?.join(',') || ""}"`
           ]);
-          // Add BOM for Excel compatibility with UTF-8
+          
           const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
           const dataStr = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
           const fileName = "debt_tracker_export_all.csv";

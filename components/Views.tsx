@@ -31,6 +31,7 @@ import {
 import { CustomDatePicker } from './CustomDatePicker';
 import { TrendChart, DistributionChart } from './DashboardCharts';
 import * as XLSX from 'xlsx';
+import { generateId } from '../services/storageService';
 
 // --- Utility ---
 const formatCurrency = (amount: number, symbol: string) => {
@@ -1015,7 +1016,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClearData, onExpor
                              targetAccountId = newlyCreated.id;
                          } else {
                              const newAccount: Account = {
-                                 id: Math.random().toString(36).substr(2, 9),
+                                 id: generateId(),
                                  name: sheetName,
                                  avatarColor: 'bg-gray-500' // Default
                              };
@@ -1047,7 +1048,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClearData, onExpor
                          }
 
                          return {
-                             id: idVal ? String(idVal) : Math.random().toString(36).substr(2, 9), // Use existing ID if available
+                             id: idVal ? String(idVal) : generateId(), // Use existing ID if available, else new
                              accountId: targetAccountId,
                              date: dateVal ? new Date(dateVal).toISOString() : new Date().toISOString(),
                              borrower: borrowerVal,
