@@ -26,10 +26,10 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { CustomDatePicker } from './components/CustomDatePicker';
 import { BorrowersView, TransactionsView, SettingsView, ReportsView, TagsView } from './components/Views';
 import { AccountSwitcher } from './components/AccountSwitcher';
-import { 
-  getStoredTransactions, 
-  saveTransactions, 
-  getStoredSettings, 
+import {
+  getStoredTransactions,
+  saveTransactions,
+  getStoredSettings,
   saveSettings,
   getAccounts,
   saveAccounts,
@@ -196,15 +196,24 @@ const App: React.FC = () => {
   const [dashboardDateFilter, setDashboardDateFilter] = useState<string>('');
   const [showDashboardDatePicker, setShowDashboardDatePicker] = useState(false);
 
+  // Persistence guards
+  const hasHydrated = useRef(false);
+  const lastAccountsRef = useRef<string | undefined>(undefined);
+  const lastTransactionsRef = useRef<string | undefined>(undefined);
+  const lastSettingsRef = useRef<string | undefined>(undefined);
+  const lastCurrentAccountIdRef = useRef<string | undefined>(undefined);
+
   // Load initial data
   useEffect(() => {
     const loadData = async () => {
       const loadedAccounts = await getAccounts();
       setAccounts(loadedAccounts);
+      lastAccountsRef.current = JSON.stringify(loadedAccounts);
 
       const stored = await getCurrentAccountId();
       const resolvedCurrentId = loadedAccounts.find(a => a.id === stored)?.id || loadedAccounts[0]?.id || '';
       setCurrentAccountIdState(resolvedCurrentId);
+      lastCurrentAccountIdRef.current = resolvedCurrentId;
 
       let data = await getStoredTransactions();
 
@@ -224,13 +233,52 @@ const App: React.FC = () => {
       }
 
       setAllTransactions(data);
+      lastTransactionsRef.current = JSON.stringify(data);
 
       const storedSettings = await getStoredSettings();
-      setSettings(s => ({ ...s, ...storedSettings }));
+      setSettings(s => {
+        const merged = { ...s, ...storedSettings };
+        lastSettingsRef.current = JSON.stringify(merged);
+        return merged;
+      });
+
+      hasHydrated.current = true;
     };
 
     loadData();
   }, []);
+
+  // --- Automatic persistence ---
+  useEffect(() => {
+    if (!hasHydrated.current) return;
+    const serialized = JSON.stringify(accounts);
+    if (serialized === lastAccountsRef.current) return;
+    lastAccountsRef.current = serialized;
+    void saveAccounts(accounts);
+  }, [accounts]);
+
+  useEffect(() => {
+    if (!hasHydrated.current) return;
+    if (currentAccountId === lastCurrentAccountIdRef.current) return;
+    lastCurrentAccountIdRef.current = currentAccountId;
+    void setCurrentAccountId(currentAccountId);
+  }, [currentAccountId]);
+
+  useEffect(() => {
+    if (!hasHydrated.current) return;
+    const serialized = JSON.stringify(allTransactions);
+    if (serialized === lastTransactionsRef.current) return;
+    lastTransactionsRef.current = serialized;
+    void saveTransactions(allTransactions);
+  }, [allTransactions]);
+
+  useEffect(() => {
+    if (!hasHydrated.current) return;
+    const serialized = JSON.stringify(settings);
+    if (serialized === lastSettingsRef.current) return;
+    lastSettingsRef.current = serialized;
+    void saveSettings(settings);
+  }, [settings]);
 
   // Derived State: Active Transactions for Current Account
   const transactions = useMemo(() => {
@@ -246,7 +294,6 @@ const App: React.FC = () => {
 
   const handleSwitchAccount = (id: string) => {
       setCurrentAccountIdState(id);
-      void setCurrentAccountId(id);
       // Optional: Reset view to dashboard on switch?
       setCurrentView('DASHBOARD');
   };
@@ -259,14 +306,12 @@ const App: React.FC = () => {
       };
       const updatedAccounts = [...accounts, newAccount];
       setAccounts(updatedAccounts);
-      await saveAccounts(updatedAccounts);
       handleSwitchAccount(newAccount.id);
   };
 
   const handleUpdateAccount = async (updatedAccount: Account) => {
       const updatedAccounts = accounts.map(a => a.id === updatedAccount.id ? updatedAccount : a);
       setAccounts(updatedAccounts);
-      await saveAccounts(updatedAccounts);
   };
 
   const requestDeleteAccount = (accountId: string) => {
@@ -289,7 +334,6 @@ const App: React.FC = () => {
 
   const handleUpdateSettings = async (newSettings: AppSettings) => {
       setSettings(newSettings);
-      await saveSettings(newSettings);
   };
 
   // Translation Helper
@@ -385,7 +429,6 @@ const App: React.FC = () => {
     }
 
     setAllTransactions(updatedAllTransactions);
-    await saveTransactions(updatedAllTransactions);
     setPrefillData(undefined); // Reset prefill
   };
 
@@ -400,7 +443,6 @@ const App: React.FC = () => {
               }
           });
           setAccounts(updatedAccounts);
-          await saveAccounts(updatedAccounts);
       }
 
       // 2. Handle Transactions
@@ -422,7 +464,6 @@ const App: React.FC = () => {
 
       const mergedTransactions = Array.from(currentMap.values());
       setAllTransactions(mergedTransactions);
-      await saveTransactions(mergedTransactions);
   };
 
   const handleEditTransaction = (tx: Transaction) => {
@@ -460,12 +501,10 @@ const App: React.FC = () => {
       if (type === 'TRANSACTION' && targetId) {
           updated = allTransactions.filter(t => t.id !== targetId);
           setAllTransactions(updated);
-          await saveTransactions(updated);
       } else if (type === 'BORROWER' && targetName) {
           // Only delete borrower for CURRENT account
           updated = allTransactions.filter(t => !(t.borrower === targetName && t.accountId === currentAccountId));
           setAllTransactions(updated);
-          await saveTransactions(updated);
       } else if (type === 'CATEGORY' && targetName) {
           // Delete category logic
           const newCategories = settings.categories.filter(c => c !== targetName);
@@ -475,17 +514,14 @@ const App: React.FC = () => {
           // Clear only CURRENT account data
           updated = allTransactions.filter(t => t.accountId !== currentAccountId);
           setAllTransactions(updated);
-          await saveTransactions(updated);
       } else if (type === 'ACCOUNT' && targetId) {
           // Delete Account Logic
           const updatedAccounts = accounts.filter(a => a.id !== targetId);
           setAccounts(updatedAccounts);
-          await saveAccounts(updatedAccounts);
 
           // Delete associated transactions from ALL transactions
           updated = allTransactions.filter(t => t.accountId !== targetId);
           setAllTransactions(updated);
-          await saveTransactions(updated);
 
           // If we deleted the current account, switch to the first available one
           if (currentAccountId === targetId) {
@@ -508,7 +544,6 @@ const App: React.FC = () => {
 
       if (modified) {
           setAllTransactions(updated);
-          void saveTransactions(updated);
       }
 
       return modified ? updated : allTransactions;
