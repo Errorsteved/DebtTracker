@@ -193,6 +193,7 @@ const App: React.FC = () => {
 
   // Persistence guards
   const hasHydrated = useRef(false);
+  const [hydrated, setHydrated] = useState(false);
   const lastPersistedRef = useRef<string | undefined>(undefined);
   const isDirtyRef = useRef(false);
   const latestStateRef = useRef<{
@@ -244,6 +245,7 @@ const App: React.FC = () => {
       lastPersistedRef.current = JSON.stringify(normalizedState);
       latestStateRef.current = normalizedState;
       hasHydrated.current = true;
+      setHydrated(true);
     };
 
     loadData();
@@ -251,7 +253,7 @@ const App: React.FC = () => {
 
   // Track changes and mark dirty when app state mutates
   useEffect(() => {
-    if (!hasHydrated.current) return;
+    if (!hydrated) return;
 
     const snapshot = {
       accounts,
@@ -265,7 +267,13 @@ const App: React.FC = () => {
     if (serialized !== lastPersistedRef.current) {
       isDirtyRef.current = true;
     }
-  }, [accounts, currentAccountId, allTransactions, settings]);
+  }, [accounts, currentAccountId, allTransactions, settings, hydrated]);
+
+  // Flush immediately after state changes (debounced by isDirtyRef)
+  useEffect(() => {
+    if (!hydrated || !isDirtyRef.current) return;
+    void flushState();
+  }, [accounts, currentAccountId, allTransactions, settings, hydrated]);
 
   const flushState = async (force = false) => {
     if (!hasHydrated.current) return;
@@ -290,13 +298,13 @@ const App: React.FC = () => {
 
   // Automatic persistence every 5 seconds, only when dirty
   useEffect(() => {
-    if (!hasHydrated.current) return;
+    if (!hydrated) return;
     const interval = setInterval(() => {
       void flushState();
     }, 5000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [hydrated]);
 
   // Final flush before window unload
   useEffect(() => {
