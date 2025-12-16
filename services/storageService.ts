@@ -21,6 +21,7 @@ type DatabaseApi = {
     transactions: Transaction[];
     settings: AppSettings;
   }) => Promise<boolean>;
+  getStatus: () => Promise<{ userData: string; dbPath: string; dbExists: boolean; dbSize: number; counts: Record<string, number> }>;
 };
 
 declare global {
@@ -174,33 +175,44 @@ const buildDefaultState = (): AppState => {
 };
 
 export const loadAppState = async (): Promise<AppState> => {
-  const state = await getDbApi().getFullState();
+  try {
+    const state = await getDbApi().getFullState();
 
-  const normalized: AppState = {
-    accounts: state.accounts && state.accounts.length > 0 ? state.accounts : buildDefaultState().accounts,
-    currentAccountId: state.currentAccountId || state.accounts?.[0]?.id || buildDefaultState().currentAccountId,
-    transactions: state.transactions || [],
-    settings: state.settings
-      ? { ...state.settings, categories: state.settings.categories ?? DEFAULT_CATEGORIES }
-      : buildDefaultState().settings,
-  };
+    const normalized: AppState = {
+      accounts: state.accounts && state.accounts.length > 0 ? state.accounts : buildDefaultState().accounts,
+      currentAccountId: state.currentAccountId || state.accounts?.[0]?.id || buildDefaultState().currentAccountId,
+      transactions: state.transactions || [],
+      settings: state.settings
+        ? { ...state.settings, categories: state.settings.categories ?? DEFAULT_CATEGORIES }
+        : buildDefaultState().settings,
+    };
 
-  if (normalized.accounts.length === 0) {
+    if (normalized.accounts.length === 0) {
+      const defaults = buildDefaultState();
+      await getDbApi().saveFullState(defaults);
+      return defaults;
+    }
+
+    // Ensure current account is valid
+    if (!normalized.accounts.find(a => a.id === normalized.currentAccountId)) {
+      normalized.currentAccountId = normalized.accounts[0].id;
+    }
+
+    return normalized;
+  } catch (error) {
+    console.error('Failed to load app state from SQLite, falling back to defaults', error);
     const defaults = buildDefaultState();
     await getDbApi().saveFullState(defaults);
     return defaults;
   }
-
-  // Ensure current account is valid
-  if (!normalized.accounts.find(a => a.id === normalized.currentAccountId)) {
-    normalized.currentAccountId = normalized.accounts[0].id;
-  }
-
-  return normalized;
 };
 
 export const persistAppState = async (state: AppState) => {
   await getDbApi().saveFullState(state);
+};
+
+export const getDatabaseStatus = async () => {
+  return getDbApi().getStatus();
 };
 
 const generateMockData = async (): Promise<Transaction[]> => {

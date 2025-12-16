@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +37,9 @@ const withTransaction = async (database, fn) => {
 
 const getDatabase = () => {
   if (dbPromise) return dbPromise;
-  const dbPath = path.join(app.getPath('userData'), 'debt-tracker.db');
+  const userData = app.getPath('userData');
+  fs.mkdirSync(userData, { recursive: true });
+  const dbPath = path.join(userData, 'debt-tracker.db');
   dbPromise = (async () => {
     const database = await openDatabase(dbPath);
     await initializeDatabase(database);
@@ -98,6 +101,31 @@ const deserializeTransactions = rows =>
   rows.map(row => ({ ...row, tags: row.tags ? JSON.parse(row.tags) : [] }));
 
 const registerIpcHandlers = () => {
+  ipcMain.handle('db:getStatus', async () => {
+    const database = await getDatabase();
+    const userData = app.getPath('userData');
+    const dbPath = path.join(userData, 'debt-tracker.db');
+    const stats = fs.existsSync(dbPath) ? fs.statSync(dbPath) : undefined;
+
+    const [accounts, transactions, settings] = await Promise.all([
+      get(database, 'SELECT COUNT(*) as count FROM accounts'),
+      get(database, 'SELECT COUNT(*) as count FROM transactions'),
+      get(database, 'SELECT COUNT(*) as count FROM settings'),
+    ]);
+
+    return {
+      userData,
+      dbPath,
+      dbExists: !!stats,
+      dbSize: stats?.size ?? 0,
+      counts: {
+        accounts: accounts?.count ?? 0,
+        transactions: transactions?.count ?? 0,
+        settings: settings?.count ?? 0,
+      },
+    };
+  });
+
   ipcMain.handle('db:getAccounts', async () => {
     const database = await getDatabase();
     const rows = await all(database, 'SELECT * FROM accounts');

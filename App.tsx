@@ -29,7 +29,8 @@ import { AccountSwitcher } from './components/AccountSwitcher';
 import {
   loadAppState,
   persistAppState,
-  generateId
+  generateId,
+  getDatabaseStatus
 } from './services/storageService';
 import { Transaction, TransactionType, AppSettings, Language, Account } from './types';
 import { translate } from './utils/i18n';
@@ -197,6 +198,13 @@ const App: React.FC = () => {
   // Load initial data
   useEffect(() => {
     const loadData = async () => {
+      try {
+        const status = await getDatabaseStatus();
+        console.info('[DB] SQLite status', status);
+      } catch (error) {
+        console.warn('[DB] Unable to read SQLite status', error);
+      }
+
       const state = await loadAppState();
 
       // Self-heal legacy records missing IDs

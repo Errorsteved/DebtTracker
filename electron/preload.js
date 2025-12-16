@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld('dbApi', {
   saveSettings: settings => ipcRenderer.invoke('db:saveSettings', settings),
   getFullState: () => ipcRenderer.invoke('db:getFullState'),
   saveFullState: state => ipcRenderer.invoke('db:saveFullState', state),
+  getStatus: () => ipcRenderer.invoke('db:getStatus'),
 });
