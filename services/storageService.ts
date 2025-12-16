@@ -51,7 +51,7 @@ type AppState = {
   settings: AppSettings;
 };
 
-const buildDefaultState = (): AppState => {
+export const buildDefaultState = (): AppState => {
   const defaultAccount: Account = {
     id: 'default_account',
     name: 'Main Account',

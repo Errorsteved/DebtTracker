@@ -30,7 +30,8 @@ import {
   loadAppState,
   persistAppState,
   generateId,
-  getDatabaseStatus
+  getDatabaseStatus,
+  buildDefaultState
 } from './services/storageService';
 import { Transaction, TransactionType, AppSettings, Language, Account } from './types';
 import { translate } from './utils/i18n';
@@ -203,6 +204,25 @@ const App: React.FC = () => {
     settings: AppSettings;
   }>();
 
+  const captureLatestState = (overrides?: Partial<{ accounts: Account[]; currentAccountId: string; transactions: Transaction[]; settings: AppSettings }>) => {
+    const snapshot = {
+      accounts: overrides?.accounts ?? accounts,
+      currentAccountId: overrides?.currentAccountId ?? currentAccountId,
+      transactions: overrides?.transactions ?? allTransactions,
+      settings: overrides?.settings ?? settings,
+    };
+    latestStateRef.current = snapshot;
+    return snapshot;
+  };
+
+  const markDirty = (overrides?: Partial<{ accounts: Account[]; currentAccountId: string; transactions: Transaction[]; settings: AppSettings }>) => {
+    const snapshot = captureLatestState(overrides);
+    const serialized = JSON.stringify(snapshot);
+    if (serialized !== lastPersistedRef.current) {
+      isDirtyRef.current = true;
+    }
+  };
+
   // Load initial data
   useEffect(() => {
     const loadData = async () => {
@@ -251,6 +271,16 @@ const App: React.FC = () => {
         setHydrated(true);
       } catch (error) {
         console.error('[DB] Failed to hydrate app state', error);
+        const fallback = buildDefaultState();
+        setAccounts(fallback.accounts);
+        setCurrentAccountIdState(fallback.currentAccountId);
+        setAllTransactions(fallback.transactions);
+        setSettings(fallback.settings);
+
+        const serialized = JSON.stringify(fallback);
+        lastPersistedRef.current = serialized;
+        isDirtyRef.current = true;
+        latestStateRef.current = fallback;
         hasHydrated.current = true;
         setHydrated(true);
       }
@@ -335,6 +365,7 @@ const App: React.FC = () => {
       setCurrentAccountIdState(id);
       // Optional: Reset view to dashboard on switch?
       setCurrentView('DASHBOARD');
+      markDirty({ currentAccountId: id });
   };
 
   const handleCreateAccount = async (name: string, color: string) => {
@@ -346,11 +377,13 @@ const App: React.FC = () => {
       const updatedAccounts = [...accounts, newAccount];
       setAccounts(updatedAccounts);
       handleSwitchAccount(newAccount.id);
+      markDirty({ accounts: updatedAccounts, currentAccountId: newAccount.id });
   };
 
   const handleUpdateAccount = async (updatedAccount: Account) => {
       const updatedAccounts = accounts.map(a => a.id === updatedAccount.id ? updatedAccount : a);
       setAccounts(updatedAccounts);
+      markDirty({ accounts: updatedAccounts });
   };
 
   const requestDeleteAccount = (accountId: string) => {
@@ -373,6 +406,7 @@ const App: React.FC = () => {
 
   const handleUpdateSettings = async (newSettings: AppSettings) => {
       setSettings(newSettings);
+      markDirty({ settings: newSettings });
   };
 
   // Translation Helper
@@ -468,6 +502,7 @@ const App: React.FC = () => {
     }
 
     setAllTransactions(updatedAllTransactions);
+    markDirty({ transactions: updatedAllTransactions });
     setPrefillData(undefined); // Reset prefill
   };
 
@@ -503,6 +538,7 @@ const App: React.FC = () => {
 
       const mergedTransactions = Array.from(currentMap.values());
       setAllTransactions(mergedTransactions);
+      markDirty({ accounts: updatedAccounts, transactions: mergedTransactions });
   };
 
   const handleEditTransaction = (tx: Transaction) => {
@@ -540,10 +576,12 @@ const App: React.FC = () => {
       if (type === 'TRANSACTION' && targetId) {
           updated = allTransactions.filter(t => t.id !== targetId);
           setAllTransactions(updated);
+          markDirty({ transactions: updated });
       } else if (type === 'BORROWER' && targetName) {
           // Only delete borrower for CURRENT account
           updated = allTransactions.filter(t => !(t.borrower === targetName && t.accountId === currentAccountId));
           setAllTransactions(updated);
+          markDirty({ transactions: updated });
       } else if (type === 'CATEGORY' && targetName) {
           // Delete category logic
           const newCategories = settings.categories.filter(c => c !== targetName);
@@ -553,6 +591,7 @@ const App: React.FC = () => {
           // Clear only CURRENT account data
           updated = allTransactions.filter(t => t.accountId !== currentAccountId);
           setAllTransactions(updated);
+          markDirty({ transactions: updated });
       } else if (type === 'ACCOUNT' && targetId) {
           // Delete Account Logic
           const updatedAccounts = accounts.filter(a => a.id !== targetId);
@@ -561,6 +600,7 @@ const App: React.FC = () => {
           // Delete associated transactions from ALL transactions
           updated = allTransactions.filter(t => t.accountId !== targetId);
           setAllTransactions(updated);
+          markDirty({ accounts: updatedAccounts, transactions: updated, currentAccountId: updatedAccounts[0]?.id || '' });
 
           // If we deleted the current account, switch to the first available one
           if (currentAccountId === targetId) {
