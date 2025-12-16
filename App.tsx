@@ -192,6 +192,7 @@ const App: React.FC = () => {
   const [showDashboardDatePicker, setShowDashboardDatePicker] = useState(false);
 
   // Persistence guards
+  const [hydrated, setHydrated] = useState(false);
   const hasHydrated = useRef(false);
   const lastPersistedRef = useRef<string | undefined>(undefined);
   const isDirtyRef = useRef(false);
@@ -244,6 +245,7 @@ const App: React.FC = () => {
       lastPersistedRef.current = JSON.stringify(normalizedState);
       latestStateRef.current = normalizedState;
       hasHydrated.current = true;
+      setHydrated(true);
     };
 
     loadData();
@@ -290,13 +292,13 @@ const App: React.FC = () => {
 
   // Automatic persistence every 5 seconds, only when dirty
   useEffect(() => {
-    if (!hasHydrated.current) return;
+    if (!hydrated) return;
     const interval = setInterval(() => {
       void flushState();
     }, 5000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [hydrated]);
 
   // Final flush before window unload
   useEffect(() => {
