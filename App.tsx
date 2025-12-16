@@ -197,7 +197,6 @@ const App: React.FC = () => {
   const hasHydrated = useRef(false);
   const lastPersistedRef = useRef<string | undefined>(undefined);
   const isDirtyRef = useRef(false);
-  const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
   const latestStateRef = useRef<{
     accounts: Account[];
     currentAccountId: string;
@@ -221,12 +220,6 @@ const App: React.FC = () => {
     const serialized = JSON.stringify(snapshot);
     if (serialized !== lastPersistedRef.current) {
       isDirtyRef.current = true;
-      if (!flushTimerRef.current && hasHydrated.current) {
-        flushTimerRef.current = setTimeout(() => {
-          flushTimerRef.current = null;
-          void flushState();
-        }, 5000);
-      }
     }
   };
 
@@ -341,16 +334,9 @@ const App: React.FC = () => {
     }
   };
 
-  // Automatic persistence every 5 seconds, only when dirty
-  useEffect(() => {
-    if (!hydrated || !hasHydrated.current) return;
-
-    const interval = setInterval(() => {
-      void flushState();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [hydrated]);
+  const handleManualSave = async () => {
+    await flushState(true);
+  };
 
   // Final flush before window unload
   useEffect(() => {
@@ -872,11 +858,20 @@ const App: React.FC = () => {
                 {/* --- DASHBOARD VIEW --- */}
                 {currentView === 'DASHBOARD' && (
                     <div className="space-y-6 animate-in fade-in duration-500">
+                        <div className="flex justify-end">
+                            <button
+                                onClick={handleManualSave}
+                                disabled={!hydrated}
+                                className="px-4 py-2 bg-ios-blue text-white rounded-xl shadow-sm hover:bg-ios-blue/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Save
+                            </button>
+                        </div>
                         {/* Stats Row - Updated to 3 columns, removed Budget Remaining */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                            <StatCard 
-                                label={t('totalOutstanding')} 
-                                amount={formatCurrency(stats.outstanding, settings.currency)} 
+                            <StatCard
+                                label={t('totalOutstanding')}
+                                amount={formatCurrency(stats.outstanding, settings.currency)}
                                 type="info" 
                                 subtext={t('netAssetValue')}
                                 onClick={() => navigateToTransactions('ALL')}
