@@ -22,7 +22,7 @@ declare global {
   }
 }
 
-const DEFAULT_CATEGORIES = ['Personal', 'Business', 'Rent', 'Dining', 'Groceries', 'Travel', 'Utilities', 'Emergency'];
+export const DEFAULT_CATEGORIES = ['Personal', 'Business', 'Rent', 'Dining', 'Groceries', 'Travel', 'Utilities', 'Emergency'];
 const AVATAR_COLORS = ['bg-blue-500', 'bg-red-500', 'bg-green-500', 'bg-yellow-500', 'bg-purple-500', 'bg-pink-500', 'bg-indigo-500', 'bg-gray-800'];
 
 const getDbApi = (): DatabaseApi => {
@@ -44,14 +44,14 @@ export const generateId = (): string => {
 
 // --- App state helpers ---
 
-type AppState = {
+export type AppState = {
   accounts: Account[];
   currentAccountId: string;
   transactions: Transaction[];
   settings: AppSettings;
 };
 
-const buildDefaultState = (): AppState => {
+export const buildDefaultState = (): AppState => {
   const defaultAccount: Account = {
     id: 'default_account',
     name: 'Main Account',

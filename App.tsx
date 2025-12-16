@@ -30,7 +30,9 @@ import {
   loadAppState,
   persistAppState,
   generateId,
-  getDatabaseStatus
+  getDatabaseStatus,
+  buildDefaultState,
+  type AppState
 } from './services/storageService';
 import { Transaction, TransactionType, AppSettings, Language, Account } from './types';
 import { translate } from './utils/i18n';
@@ -196,16 +198,12 @@ const App: React.FC = () => {
   const [hydrated, setHydrated] = useState(false);
   const lastPersistedRef = useRef<string | undefined>(undefined);
   const isDirtyRef = useRef(false);
-  const latestStateRef = useRef<{
-    accounts: Account[];
-    currentAccountId: string;
-    transactions: Transaction[];
-    settings: AppSettings;
-  }>();
+  const latestStateRef = useRef<AppState>();
 
   // Load initial data
   useEffect(() => {
     const loadData = async () => {
+      let normalizedState: AppState | undefined;
       try {
         const status = await getDatabaseStatus();
         console.info('[DB] SQLite status', status);
@@ -213,42 +211,53 @@ const App: React.FC = () => {
         console.warn('[DB] Unable to read SQLite status', error);
       }
 
-      const state = await loadAppState();
+      try {
+        const state = await loadAppState();
 
-      // Self-heal legacy records missing IDs
-      let transactions = state.transactions;
-      let modified = false;
-      transactions = transactions.map(t => {
-        if (!t.id) {
-          modified = true;
-          return { ...t, id: generateId() };
+        // Self-heal legacy records missing IDs
+        let transactions = state.transactions;
+        let modified = false;
+        transactions = transactions.map(t => {
+          if (!t.id) {
+            modified = true;
+            return { ...t, id: generateId() };
+          }
+          return t;
+        });
+
+        normalizedState = {
+          accounts: state.accounts,
+          currentAccountId: state.currentAccountId,
+          transactions,
+          settings: state.settings,
+        };
+
+        if (modified) {
+          try {
+            await persistAppState(normalizedState);
+          } catch (error) {
+            console.error('[DB] Failed to persist normalized state', error);
+          }
         }
-        return t;
-      });
-
-      const normalizedState = {
-        accounts: state.accounts,
-        currentAccountId: state.currentAccountId,
-        transactions,
-        settings: state.settings,
-      };
-
-      if (modified) {
-        await persistAppState(normalizedState);
+      } catch (error) {
+        console.error('[DB] Failed to load app state, falling back to defaults', error);
+        normalizedState = buildDefaultState();
       }
 
-      setAccounts(normalizedState.accounts);
-      setCurrentAccountIdState(normalizedState.currentAccountId);
-      setAllTransactions(normalizedState.transactions);
-      setSettings(normalizedState.settings);
+      const finalState = normalizedState ?? buildDefaultState();
 
-      lastPersistedRef.current = JSON.stringify(normalizedState);
-      latestStateRef.current = normalizedState;
+      setAccounts(finalState.accounts);
+      setCurrentAccountIdState(finalState.currentAccountId);
+      setAllTransactions(finalState.transactions);
+      setSettings(finalState.settings);
+
+      lastPersistedRef.current = JSON.stringify(finalState);
+      latestStateRef.current = finalState;
       hasHydrated.current = true;
       setHydrated(true);
     };
 
-    loadData();
+    void loadData();
   }, []);
 
   // Track changes and mark dirty when app state mutates
