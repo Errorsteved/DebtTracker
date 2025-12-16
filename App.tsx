@@ -194,6 +194,13 @@ const App: React.FC = () => {
   // Persistence guards
   const hasHydrated = useRef(false);
   const lastPersistedRef = useRef<string | undefined>(undefined);
+  const isDirtyRef = useRef(false);
+  const latestStateRef = useRef<{
+    accounts: Account[];
+    currentAccountId: string;
+    transactions: Transaction[];
+    settings: AppSettings;
+  }>();
 
   // Load initial data
   useEffect(() => {
@@ -235,40 +242,71 @@ const App: React.FC = () => {
       setSettings(normalizedState.settings);
 
       lastPersistedRef.current = JSON.stringify(normalizedState);
+      latestStateRef.current = normalizedState;
       hasHydrated.current = true;
     };
 
     loadData();
   }, []);
 
-  // --- Automatic persistence every 5 seconds ---
+  // Track changes and mark dirty when app state mutates
   useEffect(() => {
     if (!hasHydrated.current) return;
 
-    const persist = async () => {
-      const snapshot = {
+    const snapshot = {
+      accounts,
+      currentAccountId,
+      transactions: allTransactions,
+      settings,
+    };
+
+    latestStateRef.current = snapshot;
+    const serialized = JSON.stringify(snapshot);
+    if (serialized !== lastPersistedRef.current) {
+      isDirtyRef.current = true;
+    }
+  }, [accounts, currentAccountId, allTransactions, settings]);
+
+  const flushState = async (force = false) => {
+    if (!hasHydrated.current) return;
+    const snapshot =
+      latestStateRef.current || {
         accounts,
         currentAccountId,
         transactions: allTransactions,
         settings,
       };
+    const serialized = JSON.stringify(snapshot);
+    if (!force && (!isDirtyRef.current || serialized === lastPersistedRef.current)) return;
 
-      const serialized = JSON.stringify(snapshot);
-      if (serialized === lastPersistedRef.current) return;
+    try {
+      await persistAppState(snapshot);
       lastPersistedRef.current = serialized;
+      isDirtyRef.current = false;
+    } catch (error) {
+      console.error('[DB] Failed to flush app state', error);
+    }
+  };
 
-      try {
-        await persistAppState(snapshot);
-      } catch (error) {
-        console.error('[DB] Failed to persist app state', error);
-      }
+  // Automatic persistence every 5 seconds, only when dirty
+  useEffect(() => {
+    if (!hasHydrated.current) return;
+    const interval = setInterval(() => {
+      void flushState();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Final flush before window unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      void flushState(true);
     };
 
-    // Persist immediately on change, then every 5 seconds
-    void persist();
-    const interval = setInterval(persist, 5000);
-    return () => clearInterval(interval);
-  }, [accounts, currentAccountId, allTransactions, settings]);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   // Derived State: Active Transactions for Current Account
   const transactions = useMemo(() => {

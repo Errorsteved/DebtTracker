@@ -10,6 +10,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 sqlite3.verbose();
 
 let dbPromise;
+let dbPath;
+
+const ensureUserDataDir = () => {
+  const dir = app.getPath('userData');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+};
+
+const logDebug = (message, meta = {}) => {
+  try {
+    const userData = ensureUserDataDir();
+    const logFile = path.join(userData, 'debug.log');
+    const line = `[${new Date().toISOString()}][${process.type}][main] ${message} ${Object.keys(meta).length ? JSON.stringify(meta) : ''}\n`;
+    fs.appendFileSync(logFile, line);
+    console.log(line.trim());
+  } catch (error) {
+    console.error('Failed to write debug log', error);
+  }
+};
 
 const openDatabase = dbPath =>
   new Promise((resolve, reject) => {
@@ -37,15 +56,18 @@ const withTransaction = async (database, fn) => {
 
 const getDatabase = () => {
   if (dbPromise) return dbPromise;
-  const userData = app.getPath('userData');
-  fs.mkdirSync(userData, { recursive: true });
-  const dbPath = path.join(userData, 'debt-tracker.db');
+  const userData = ensureUserDataDir();
+  dbPath = path.join(userData, 'debt-tracker.db');
+
   dbPromise = (async () => {
+    logDebug('Opening SQLite connection', { appName: app.getName(), userData, dbPath });
     const database = await openDatabase(dbPath);
+    await run(database, 'PRAGMA journal_mode=WAL;');
     await initializeDatabase(database);
     await seedDefaults(database);
     return database;
   })();
+
   return dbPromise;
 };
 
@@ -100,11 +122,88 @@ const serializeTransactions = transactions =>
 const deserializeTransactions = rows =>
   rows.map(row => ({ ...row, tags: row.tags ? JSON.parse(row.tags) : [] }));
 
+const loadAppState = async () => {
+  const database = await getDatabase();
+
+  const [accounts, currentAccountId, transactions, settings] = await Promise.all([
+    all(database, 'SELECT * FROM accounts'),
+    get(database, 'SELECT value FROM settings WHERE key = ?', ['currentAccountId']),
+    all(database, 'SELECT * FROM transactions ORDER BY date DESC'),
+    get(database, 'SELECT value FROM settings WHERE key = ?', ['appSettings']),
+  ]);
+
+  const state = {
+    accounts: accounts.map(row => ({ ...row, isDefault: !!row.isDefault })),
+    currentAccountId: currentAccountId ? JSON.parse(currentAccountId.value) : undefined,
+    transactions: deserializeTransactions(transactions),
+    settings: settings ? JSON.parse(settings.value) : undefined,
+  };
+
+  logDebug('Loaded app state from SQLite', {
+    accounts: state.accounts.length,
+    transactions: state.transactions.length,
+    hasSettings: !!state.settings,
+  });
+
+  return state;
+};
+
+const applyChanges = async state => {
+  const database = await getDatabase();
+  await withTransaction(database, async () => {
+    await run(database, 'DELETE FROM accounts');
+    for (const acc of state.accounts) {
+      await run(database, 'INSERT INTO accounts (id, name, avatarColor, isDefault) VALUES (?, ?, ?, ?)', [
+        acc.id,
+        acc.name,
+        acc.avatarColor,
+        acc.isDefault ? 1 : 0,
+      ]);
+    }
+
+    await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
+      'currentAccountId',
+      JSON.stringify(state.currentAccountId),
+    ]);
+
+    await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
+      'appSettings',
+      JSON.stringify(state.settings),
+    ]);
+
+    await run(database, 'DELETE FROM transactions');
+    for (const t of serializeTransactions(state.transactions)) {
+      await run(
+        database,
+        `INSERT INTO transactions (id, accountId, borrower, amount, date, dueDate, type, note, category, tags)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          t.id,
+          t.accountId,
+          t.borrower,
+          t.amount,
+          t.date,
+          t.dueDate,
+          t.type,
+          t.note,
+          t.category,
+          t.tags,
+        ]
+      );
+    }
+  });
+
+  logDebug('Flushed app state to SQLite', {
+    accounts: state.accounts.length,
+    transactions: state.transactions.length,
+    hasSettings: !!state.settings,
+  });
+};
+
 const registerIpcHandlers = () => {
   ipcMain.handle('db:getStatus', async () => {
     const database = await getDatabase();
-    const userData = app.getPath('userData');
-    const dbPath = path.join(userData, 'debt-tracker.db');
+    const userData = ensureUserDataDir();
     const stats = fs.existsSync(dbPath) ? fs.statSync(dbPath) : undefined;
 
     const [accounts, transactions, settings] = await Promise.all([
@@ -113,7 +212,9 @@ const registerIpcHandlers = () => {
       get(database, 'SELECT COUNT(*) as count FROM settings'),
     ]);
 
-    return {
+    const payload = {
+      appName: app.getName(),
+      processType: process.type,
       userData,
       dbPath,
       dbExists: !!stats,
@@ -124,155 +225,14 @@ const registerIpcHandlers = () => {
         settings: settings?.count ?? 0,
       },
     };
+
+    logDebug('DB status requested', payload);
+    return payload;
   });
 
-  ipcMain.handle('db:getAccounts', async () => {
-    const database = await getDatabase();
-    const rows = await all(database, 'SELECT * FROM accounts');
-    return rows.map(row => ({ ...row, isDefault: !!row.isDefault }));
-  });
-
-  ipcMain.handle('db:saveAccounts', async (_event, accounts) => {
-    const database = await getDatabase();
-    await withTransaction(database, async () => {
-      await run(database, 'DELETE FROM accounts');
-      for (const acc of accounts) {
-        await run(database, 'INSERT INTO accounts (id, name, avatarColor, isDefault) VALUES (?, ?, ?, ?)', [
-          acc.id,
-          acc.name,
-          acc.avatarColor,
-          acc.isDefault ? 1 : 0,
-        ]);
-      }
-    });
-    return true;
-  });
-
-  ipcMain.handle('db:getCurrentAccountId', async () => {
-    const database = await getDatabase();
-    const row = await get(database, 'SELECT value FROM settings WHERE key = ?', ['currentAccountId']);
-    return row ? JSON.parse(row.value) : undefined;
-  });
-
-  ipcMain.handle('db:setCurrentAccountId', async (_event, id) => {
-    const database = await getDatabase();
-    await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
-      'currentAccountId',
-      JSON.stringify(id),
-    ]);
-    return true;
-  });
-
-  ipcMain.handle('db:getTransactions', async () => {
-    const database = await getDatabase();
-    const rows = await all(database, 'SELECT * FROM transactions ORDER BY date DESC');
-    return deserializeTransactions(rows);
-  });
-
-  ipcMain.handle('db:saveTransactions', async (_event, transactions) => {
-    const database = await getDatabase();
-    await withTransaction(database, async () => {
-      await run(database, 'DELETE FROM transactions');
-      for (const t of serializeTransactions(transactions)) {
-        await run(
-          database,
-          `INSERT INTO transactions (id, accountId, borrower, amount, date, dueDate, type, note, category, tags)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            t.id,
-            t.accountId,
-            t.borrower,
-            t.amount,
-            t.date,
-            t.dueDate,
-            t.type,
-            t.note,
-            t.category,
-            t.tags,
-          ]
-        );
-      }
-    });
-    return true;
-  });
-
-  ipcMain.handle('db:getSettings', async () => {
-    const database = await getDatabase();
-    const row = await get(database, 'SELECT value FROM settings WHERE key = ?', ['appSettings']);
-    return row ? JSON.parse(row.value) : undefined;
-  });
-
-  ipcMain.handle('db:saveSettings', async (_event, settings) => {
-    const database = await getDatabase();
-    await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
-      'appSettings',
-      JSON.stringify(settings),
-    ]);
-    return true;
-  });
-
-  ipcMain.handle('db:getFullState', async () => {
-    const database = await getDatabase();
-    const [accounts, currentAccountId, transactions, settings] = await Promise.all([
-      all(database, 'SELECT * FROM accounts'),
-      get(database, 'SELECT value FROM settings WHERE key = ?', ['currentAccountId']),
-      all(database, 'SELECT * FROM transactions ORDER BY date DESC'),
-      get(database, 'SELECT value FROM settings WHERE key = ?', ['appSettings']),
-    ]);
-
-    return {
-      accounts: accounts.map(row => ({ ...row, isDefault: !!row.isDefault })),
-      currentAccountId: currentAccountId ? JSON.parse(currentAccountId.value) : undefined,
-      transactions: deserializeTransactions(transactions),
-      settings: settings ? JSON.parse(settings.value) : undefined,
-    };
-  });
-
-  ipcMain.handle('db:saveFullState', async (_event, state) => {
-    const database = await getDatabase();
-    await withTransaction(database, async () => {
-      await run(database, 'DELETE FROM accounts');
-      for (const acc of state.accounts) {
-        await run(database, 'INSERT INTO accounts (id, name, avatarColor, isDefault) VALUES (?, ?, ?, ?)', [
-          acc.id,
-          acc.name,
-          acc.avatarColor,
-          acc.isDefault ? 1 : 0,
-        ]);
-      }
-
-      await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
-        'currentAccountId',
-        JSON.stringify(state.currentAccountId),
-      ]);
-
-      await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
-        'appSettings',
-        JSON.stringify(state.settings),
-      ]);
-
-      await run(database, 'DELETE FROM transactions');
-      for (const t of serializeTransactions(state.transactions)) {
-        await run(
-          database,
-          `INSERT INTO transactions (id, accountId, borrower, amount, date, dueDate, type, note, category, tags)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            t.id,
-            t.accountId,
-            t.borrower,
-            t.amount,
-            t.date,
-            t.dueDate,
-            t.type,
-            t.note,
-            t.category,
-            t.tags,
-          ]
-        );
-      }
-    });
-
+  ipcMain.handle('db:load', async () => loadAppState());
+  ipcMain.handle('db:flush', async (_event, state) => {
+    await applyChanges(state);
     return true;
   });
 };

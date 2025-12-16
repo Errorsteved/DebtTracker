@@ -1,21 +1,13 @@
 import { Transaction, AppSettings, Account } from '../types';
 
 type DatabaseApi = {
-  getAccounts: () => Promise<Account[]>;
-  saveAccounts: (accounts: Account[]) => Promise<boolean>;
-  getCurrentAccountId: () => Promise<string | undefined>;
-  setCurrentAccountId: (id: string) => Promise<boolean>;
-  getTransactions: () => Promise<Transaction[]>;
-  saveTransactions: (transactions: Transaction[]) => Promise<boolean>;
-  getSettings: () => Promise<AppSettings | undefined>;
-  saveSettings: (settings: AppSettings) => Promise<boolean>;
-  getFullState: () => Promise<{
+  load: () => Promise<{
     accounts: Account[];
     currentAccountId?: string;
     transactions: Transaction[];
     settings?: AppSettings;
   }>;
-  saveFullState: (state: {
+  flush: (state: {
     accounts: Account[];
     currentAccountId: string;
     transactions: Transaction[];
@@ -49,98 +41,6 @@ export const generateId = (): string => {
 };
 
 // --- Account Management ---
-
-export const getAccounts = async (): Promise<Account[]> => {
-  const accounts = await getDbApi().getAccounts();
-  if (accounts.length > 0) return accounts;
-
-  const defaultAccount: Account = {
-    id: 'default_account',
-    name: 'Main Account',
-    avatarColor: 'bg-ios-blue',
-    isDefault: true,
-  };
-  await saveAccounts([defaultAccount]);
-  return [defaultAccount];
-};
-
-export const saveAccounts = async (accounts: Account[]) => {
-  await getDbApi().saveAccounts(accounts);
-};
-
-export const getCurrentAccountId = async (): Promise<string> => {
-  const stored = await getDbApi().getCurrentAccountId();
-  if (stored) return stored;
-  const accounts = await getAccounts();
-  return accounts[0].id;
-};
-
-export const setCurrentAccountId = async (id: string) => {
-  await getDbApi().setCurrentAccountId(id);
-};
-
-// --- Transactions Management ---
-
-export const getStoredTransactions = async (): Promise<Transaction[]> => {
-  const stored = await getDbApi().getTransactions();
-  if (stored && stored.length > 0) {
-    let transactions: Transaction[] = stored;
-    const accounts = await getAccounts();
-    const defaultAccountId = accounts[0].id;
-    let needsSave = false;
-
-    transactions = transactions.map(t => {
-      let modified = false;
-      const newT = { ...t };
-
-      if (!newT.accountId) {
-        newT.accountId = defaultAccountId;
-        modified = true;
-      }
-
-      if (!newT.id) {
-        newT.id = generateId();
-        modified = true;
-      }
-
-      if (modified) needsSave = true;
-      return newT;
-    });
-
-    if (needsSave) {
-      await saveTransactions(transactions);
-    }
-
-    return transactions;
-  }
-  const data = await generateMockData();
-  await saveTransactions(data);
-  return data;
-};
-
-export const saveTransactions = async (transactions: Transaction[]) => {
-  await getDbApi().saveTransactions(transactions);
-};
-
-// --- Settings Management ---
-
-export const getStoredSettings = async (): Promise<AppSettings> => {
-  const stored = await getDbApi().getSettings();
-  if (stored) {
-    const parsed = { ...stored };
-    if (!parsed.categories) {
-      parsed.categories = DEFAULT_CATEGORIES;
-    }
-    return parsed;
-  }
-  const defaults = { currency: '¥', dateFormat: 'YYYY-MM-DD', language: 'zh', categories: DEFAULT_CATEGORIES };
-  await saveSettings(defaults);
-  return defaults;
-};
-
-export const saveSettings = async (settings: AppSettings) => {
-  await getDbApi().saveSettings(settings);
-};
 
 // --- App state helpers ---
 
@@ -176,7 +76,7 @@ const buildDefaultState = (): AppState => {
 
 export const loadAppState = async (): Promise<AppState> => {
   try {
-    const state = await getDbApi().getFullState();
+    const state = await getDbApi().load();
 
     const normalized: AppState = {
       accounts: state.accounts && state.accounts.length > 0 ? state.accounts : buildDefaultState().accounts,
@@ -189,7 +89,7 @@ export const loadAppState = async (): Promise<AppState> => {
 
     if (normalized.accounts.length === 0) {
       const defaults = buildDefaultState();
-      await getDbApi().saveFullState(defaults);
+      await getDbApi().flush(defaults);
       return defaults;
     }
 
@@ -202,13 +102,13 @@ export const loadAppState = async (): Promise<AppState> => {
   } catch (error) {
     console.error('Failed to load app state from SQLite, falling back to defaults', error);
     const defaults = buildDefaultState();
-    await getDbApi().saveFullState(defaults);
+    await getDbApi().flush(defaults);
     return defaults;
   }
 };
 
 export const persistAppState = async (state: AppState) => {
-  await getDbApi().saveFullState(state);
+  await getDbApi().flush(state);
 };
 
 export const getDatabaseStatus = async () => {
