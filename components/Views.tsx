@@ -1109,7 +1109,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClearData, onExpor
         { symbol: '$', label: 'USD ($)' },
         { symbol: '€', label: 'EUR (€)' },
         { symbol: '£', label: 'GBP (£)' },
-        { symbol: '¥', label: 'CNY/JPY (¥)' },
+        { symbol: '¥', label: 'CNY (¥)' },
         { symbol: '₹', label: 'INR (₹)' },
         { symbol: 'kr', label: 'KRW (kr)' },
     ];
