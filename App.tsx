@@ -193,7 +193,7 @@ const App: React.FC = () => {
 
   // Persistence guards
   const hasHydrated = useRef(false);
-  const lastSnapshotRef = useRef<string | undefined>(undefined);
+  const lastPersistedRef = useRef<string | undefined>(undefined);
 
   // Load initial data
   useEffect(() => {
@@ -234,26 +234,40 @@ const App: React.FC = () => {
       setAllTransactions(normalizedState.transactions);
       setSettings(normalizedState.settings);
 
-      lastSnapshotRef.current = JSON.stringify(normalizedState);
+      lastPersistedRef.current = JSON.stringify(normalizedState);
       hasHydrated.current = true;
     };
 
     loadData();
   }, []);
 
-  // --- Automatic persistence ---
+  // --- Automatic persistence every 5 seconds ---
   useEffect(() => {
     if (!hasHydrated.current) return;
-    const snapshot = {
-      accounts,
-      currentAccountId,
-      transactions: allTransactions,
-      settings,
+
+    const persist = async () => {
+      const snapshot = {
+        accounts,
+        currentAccountId,
+        transactions: allTransactions,
+        settings,
+      };
+
+      const serialized = JSON.stringify(snapshot);
+      if (serialized === lastPersistedRef.current) return;
+      lastPersistedRef.current = serialized;
+
+      try {
+        await persistAppState(snapshot);
+      } catch (error) {
+        console.error('[DB] Failed to persist app state', error);
+      }
     };
-    const serialized = JSON.stringify(snapshot);
-    if (serialized === lastSnapshotRef.current) return;
-    lastSnapshotRef.current = serialized;
-    void persistAppState(snapshot);
+
+    // Persist immediately on change, then every 5 seconds
+    void persist();
+    const interval = setInterval(persist, 5000);
+    return () => clearInterval(interval);
   }, [accounts, currentAccountId, allTransactions, settings]);
 
   // Derived State: Active Transactions for Current Account
