@@ -27,14 +27,8 @@ import { CustomDatePicker } from './components/CustomDatePicker';
 import { BorrowersView, TransactionsView, SettingsView, ReportsView, TagsView } from './components/Views';
 import { AccountSwitcher } from './components/AccountSwitcher';
 import {
-  getStoredTransactions,
-  saveTransactions,
-  getStoredSettings,
-  saveSettings,
-  getAccounts,
-  saveAccounts,
-  getCurrentAccountId,
-  setCurrentAccountId,
+  loadAppState,
+  persistAppState,
   generateId
 } from './services/storageService';
 import { Transaction, TransactionType, AppSettings, Language, Account } from './types';
@@ -198,50 +192,41 @@ const App: React.FC = () => {
 
   // Persistence guards
   const hasHydrated = useRef(false);
-  const lastAccountsRef = useRef<string | undefined>(undefined);
-  const lastTransactionsRef = useRef<string | undefined>(undefined);
-  const lastSettingsRef = useRef<string | undefined>(undefined);
-  const lastCurrentAccountIdRef = useRef<string | undefined>(undefined);
+  const lastSnapshotRef = useRef<string | undefined>(undefined);
 
   // Load initial data
   useEffect(() => {
     const loadData = async () => {
-      const loadedAccounts = await getAccounts();
-      setAccounts(loadedAccounts);
-      lastAccountsRef.current = JSON.stringify(loadedAccounts);
+      const state = await loadAppState();
 
-      const stored = await getCurrentAccountId();
-      const resolvedCurrentId = loadedAccounts.find(a => a.id === stored)?.id || loadedAccounts[0]?.id || '';
-      setCurrentAccountIdState(resolvedCurrentId);
-      lastCurrentAccountIdRef.current = resolvedCurrentId;
-
-      let data = await getStoredTransactions();
-
-      // FIX: Self-healing to ensure all transactions have IDs (legacy data support)
-      // This prevents export issues where IDs might be undefined for secondary accounts
-      let dataModified = false;
-      data = data.map(t => {
-          if (!t.id) {
-              dataModified = true;
-              return { ...t, id: generateId() };
-          }
-          return t;
+      // Self-heal legacy records missing IDs
+      let transactions = state.transactions;
+      let modified = false;
+      transactions = transactions.map(t => {
+        if (!t.id) {
+          modified = true;
+          return { ...t, id: generateId() };
+        }
+        return t;
       });
 
-      if (dataModified) {
-          await saveTransactions(data);
+      const normalizedState = {
+        accounts: state.accounts,
+        currentAccountId: state.currentAccountId,
+        transactions,
+        settings: state.settings,
+      };
+
+      if (modified) {
+        await persistAppState(normalizedState);
       }
 
-      setAllTransactions(data);
-      lastTransactionsRef.current = JSON.stringify(data);
+      setAccounts(normalizedState.accounts);
+      setCurrentAccountIdState(normalizedState.currentAccountId);
+      setAllTransactions(normalizedState.transactions);
+      setSettings(normalizedState.settings);
 
-      const storedSettings = await getStoredSettings();
-      setSettings(s => {
-        const merged = { ...s, ...storedSettings };
-        lastSettingsRef.current = JSON.stringify(merged);
-        return merged;
-      });
-
+      lastSnapshotRef.current = JSON.stringify(normalizedState);
       hasHydrated.current = true;
     };
 
@@ -251,34 +236,17 @@ const App: React.FC = () => {
   // --- Automatic persistence ---
   useEffect(() => {
     if (!hasHydrated.current) return;
-    const serialized = JSON.stringify(accounts);
-    if (serialized === lastAccountsRef.current) return;
-    lastAccountsRef.current = serialized;
-    void saveAccounts(accounts);
-  }, [accounts]);
-
-  useEffect(() => {
-    if (!hasHydrated.current) return;
-    if (currentAccountId === lastCurrentAccountIdRef.current) return;
-    lastCurrentAccountIdRef.current = currentAccountId;
-    void setCurrentAccountId(currentAccountId);
-  }, [currentAccountId]);
-
-  useEffect(() => {
-    if (!hasHydrated.current) return;
-    const serialized = JSON.stringify(allTransactions);
-    if (serialized === lastTransactionsRef.current) return;
-    lastTransactionsRef.current = serialized;
-    void saveTransactions(allTransactions);
-  }, [allTransactions]);
-
-  useEffect(() => {
-    if (!hasHydrated.current) return;
-    const serialized = JSON.stringify(settings);
-    if (serialized === lastSettingsRef.current) return;
-    lastSettingsRef.current = serialized;
-    void saveSettings(settings);
-  }, [settings]);
+    const snapshot = {
+      accounts,
+      currentAccountId,
+      transactions: allTransactions,
+      settings,
+    };
+    const serialized = JSON.stringify(snapshot);
+    if (serialized === lastSnapshotRef.current) return;
+    lastSnapshotRef.current = serialized;
+    void persistAppState(snapshot);
+  }, [accounts, currentAccountId, allTransactions, settings]);
 
   // Derived State: Active Transactions for Current Account
   const transactions = useMemo(() => {

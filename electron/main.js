@@ -182,6 +182,71 @@ const registerIpcHandlers = () => {
     ]);
     return true;
   });
+
+  ipcMain.handle('db:getFullState', async () => {
+    const database = await getDatabase();
+    const [accounts, currentAccountId, transactions, settings] = await Promise.all([
+      all(database, 'SELECT * FROM accounts'),
+      get(database, 'SELECT value FROM settings WHERE key = ?', ['currentAccountId']),
+      all(database, 'SELECT * FROM transactions ORDER BY date DESC'),
+      get(database, 'SELECT value FROM settings WHERE key = ?', ['appSettings']),
+    ]);
+
+    return {
+      accounts: accounts.map(row => ({ ...row, isDefault: !!row.isDefault })),
+      currentAccountId: currentAccountId ? JSON.parse(currentAccountId.value) : undefined,
+      transactions: deserializeTransactions(transactions),
+      settings: settings ? JSON.parse(settings.value) : undefined,
+    };
+  });
+
+  ipcMain.handle('db:saveFullState', async (_event, state) => {
+    const database = await getDatabase();
+    await withTransaction(database, async () => {
+      await run(database, 'DELETE FROM accounts');
+      for (const acc of state.accounts) {
+        await run(database, 'INSERT INTO accounts (id, name, avatarColor, isDefault) VALUES (?, ?, ?, ?)', [
+          acc.id,
+          acc.name,
+          acc.avatarColor,
+          acc.isDefault ? 1 : 0,
+        ]);
+      }
+
+      await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
+        'currentAccountId',
+        JSON.stringify(state.currentAccountId),
+      ]);
+
+      await run(database, 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
+        'appSettings',
+        JSON.stringify(state.settings),
+      ]);
+
+      await run(database, 'DELETE FROM transactions');
+      for (const t of serializeTransactions(state.transactions)) {
+        await run(
+          database,
+          `INSERT INTO transactions (id, accountId, borrower, amount, date, dueDate, type, note, category, tags)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            t.id,
+            t.accountId,
+            t.borrower,
+            t.amount,
+            t.date,
+            t.dueDate,
+            t.type,
+            t.note,
+            t.category,
+            t.tags,
+          ]
+        );
+      }
+    });
+
+    return true;
+  });
 };
 
 const createWindow = () => {

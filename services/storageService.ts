@@ -9,6 +9,18 @@ type DatabaseApi = {
   saveTransactions: (transactions: Transaction[]) => Promise<boolean>;
   getSettings: () => Promise<AppSettings | undefined>;
   saveSettings: (settings: AppSettings) => Promise<boolean>;
+  getFullState: () => Promise<{
+    accounts: Account[];
+    currentAccountId?: string;
+    transactions: Transaction[];
+    settings?: AppSettings;
+  }>;
+  saveFullState: (state: {
+    accounts: Account[];
+    currentAccountId: string;
+    transactions: Transaction[];
+    settings: AppSettings;
+  }) => Promise<boolean>;
 };
 
 declare global {
@@ -127,6 +139,68 @@ export const getStoredSettings = async (): Promise<AppSettings> => {
 
 export const saveSettings = async (settings: AppSettings) => {
   await getDbApi().saveSettings(settings);
+};
+
+// --- App state helpers ---
+
+type AppState = {
+  accounts: Account[];
+  currentAccountId: string;
+  transactions: Transaction[];
+  settings: AppSettings;
+};
+
+const buildDefaultState = (): AppState => {
+  const defaultAccount: Account = {
+    id: 'default_account',
+    name: 'Main Account',
+    avatarColor: 'bg-ios-blue',
+    isDefault: true,
+  };
+
+  const settings: AppSettings = {
+    currency: '¥',
+    dateFormat: 'YYYY-MM-DD',
+    language: 'zh',
+    categories: DEFAULT_CATEGORIES,
+  };
+
+  return {
+    accounts: [defaultAccount],
+    currentAccountId: defaultAccount.id,
+    transactions: [],
+    settings,
+  };
+};
+
+export const loadAppState = async (): Promise<AppState> => {
+  const state = await getDbApi().getFullState();
+
+  const normalized: AppState = {
+    accounts: state.accounts && state.accounts.length > 0 ? state.accounts : buildDefaultState().accounts,
+    currentAccountId: state.currentAccountId || state.accounts?.[0]?.id || buildDefaultState().currentAccountId,
+    transactions: state.transactions || [],
+    settings: state.settings
+      ? { ...state.settings, categories: state.settings.categories ?? DEFAULT_CATEGORIES }
+      : buildDefaultState().settings,
+  };
+
+  if (normalized.accounts.length === 0) {
+    const defaults = buildDefaultState();
+    await getDbApi().saveFullState(defaults);
+    return defaults;
+  }
+
+  // Ensure current account is valid
+  if (!normalized.accounts.find(a => a.id === normalized.currentAccountId)) {
+    normalized.currentAccountId = normalized.accounts[0].id;
+  }
+
+  return normalized;
+};
+
+export const persistAppState = async (state: AppState) => {
+  await getDbApi().saveFullState(state);
 };
 
 const generateMockData = async (): Promise<Transaction[]> => {
