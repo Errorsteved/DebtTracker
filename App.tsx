@@ -362,20 +362,22 @@ const App: React.FC = () => {
 
   const handleSaveTransaction = (data: any) => {
     let updatedAllTransactions;
-    
+
     // Check if it's an edit (ID exists)
     if (prefillData && prefillData.id) {
         // Edit existing: Find in master list
         const id = prefillData.id;
-        updatedAllTransactions = allTransactions.map(t => 
+        updatedAllTransactions = allTransactions.map(t =>
             t.id === id ? { ...data, id, accountId: t.accountId } : t
         );
     } else {
         // Create new: Add with current account ID
+        // Ignore any ID coming from the form payload so new transactions always get a fresh generated ID
+        const { id: _ignoredId, ...txData } = data;
         const newTx: Transaction = {
             id: generateId(),
             accountId: currentAccountId,
-            ...data
+            ...txData
         };
         updatedAllTransactions = [newTx, ...allTransactions];
     }
@@ -492,7 +494,27 @@ const App: React.FC = () => {
       setDeleteModalState({ isOpen: false, type: 'TRANSACTION' });
   };
 
+  const ensureTransactionIds = () => {
+      let modified = false;
+      const updated = allTransactions.map(t => {
+          if (!t.id) {
+              modified = true;
+              return { ...t, id: generateId() };
+          }
+          return t;
+      });
+
+      if (modified) {
+          setAllTransactions(updated);
+          saveTransactions(updated);
+      }
+
+      return modified ? updated : allTransactions;
+  };
+
   const handleExportData = (format: 'xlsx' | 'csv') => {
+      const transactionsWithIds = ensureTransactionIds();
+
       if (format === 'xlsx') {
           // Excel Export
           const wb = XLSX.utils.book_new();
@@ -512,7 +534,7 @@ const App: React.FC = () => {
           const headers = ['ID', kDate, kBorrower, kCategory, kTags, kStatus, kAmount, kNote, kDueDate];
 
           accounts.forEach(account => {
-              const accountTxs = allTransactions.filter(t => t.accountId === account.id);
+              const accountTxs = transactionsWithIds.filter(t => t.accountId === account.id);
               if (accountTxs.length === 0) return; // Optional: can export empty sheet if preferred
 
               const rows = accountTxs.map(t => {
@@ -564,7 +586,7 @@ const App: React.FC = () => {
 
           const headers = ["ID", "Account", "Date", "Type", "Borrower", "Amount", "Category", "Note", "DueDate", "Tags"];
           
-          const rows = allTransactions.map(t => [
+          const rows = transactionsWithIds.map(t => [
               t.id, 
               `"${accountMap.get(t.accountId) || 'Unknown'}"`,
               t.date, 

@@ -45,3 +45,19 @@ DebtTracker 是一个**用于记录欠款、还款与余额变动的轻量级债
 - 小团队 / 小公司：
   - 内部垫款、员工暂借、客户欠款跟踪
 - 可作为 ERP / 财务系统中的 **Debt / AR / AP 子模块**
+
+## 快速开始
+
+- 安装依赖：`npm install`
+- 开发启动：`npm run dev`
+- 打包 Web 版本：`npm run build`
+
+## Windows 桌面版（免安装可执行文件）
+
+项目内置了一个最小化的 Electron 包装层，可以在保留现有界面和功能的前提下，生成免安装的 Windows 可执行文件。
+
+1. 安装依赖（首次执行）：`npm install`
+2. 构建前端资源：`npm run build`
+3. 打包 Windows 便携版：`npm run electron:build:win`
+
+生成的便携版 `.exe` 位于 `release/` 目录，可直接运行，无需安装。若要产出 Windows 可执行文件，请在 Windows 环境或支持 Windows 目标的交叉编译环境中运行上述命令。
