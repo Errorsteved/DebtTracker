@@ -197,6 +197,7 @@ const App: React.FC = () => {
   const hasHydrated = useRef(false);
   const lastPersistedRef = useRef<string | undefined>(undefined);
   const isDirtyRef = useRef(false);
+  const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
   const latestStateRef = useRef<{
     accounts: Account[];
     currentAccountId: string;
@@ -220,6 +221,12 @@ const App: React.FC = () => {
     const serialized = JSON.stringify(snapshot);
     if (serialized !== lastPersistedRef.current) {
       isDirtyRef.current = true;
+      if (!flushTimerRef.current && hasHydrated.current) {
+        flushTimerRef.current = setTimeout(() => {
+          flushTimerRef.current = null;
+          void flushState();
+        }, 5000);
+      }
     }
   };
 
