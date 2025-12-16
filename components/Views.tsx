@@ -1109,7 +1109,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClearData, onExpor
         { symbol: '$', label: 'USD ($)' },
         { symbol: '€', label: 'EUR (€)' },
         { symbol: '£', label: 'GBP (£)' },
-        { symbol: '¥', label: 'CNY/JPY (¥)' },
+        { symbol: '¥', label: 'CNY (¥)' },
         { symbol: '₹', label: 'INR (₹)' },
         { symbol: 'kr', label: 'KRW (kr)' },
     ];
@@ -1388,9 +1388,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, currency
   };
 
   return (
-    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 h-full flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden">
+    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
         {/* Header */}
-        <div className="flex justify-between items-center mb-4 shrink-0">
+        <div className="flex justify-between items-center mb-6 shrink-0">
             <h2 className="text-3xl font-bold text-ios-red tracking-tight flex items-baseline">
                 {selectedYear}
                 <span className="text-sm font-medium text-gray-400 ml-2 tracking-normal">
@@ -1413,8 +1413,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, currency
             </div>
         </div>
 
-        {/* 12 Month Grid - Fixed Height Layout */}
-        <div className="flex-1 min-h-0 grid grid-cols-3 grid-rows-4 gap-x-8 gap-y-4">
+        {/* 12 Month Grid - Auto Height to maintain proportions */}
+        <div className="grid grid-cols-3 gap-x-8 gap-y-10">
             {Array.from({ length: 12 }, (_, i) => renderMonth(i))}
         </div>
     </div>

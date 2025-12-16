@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Node dependencies
+node_modules/
+
+# Build / release output
+release/
+
+# Lock file
+package-lock.json
